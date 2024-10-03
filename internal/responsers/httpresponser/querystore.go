@@ -15,14 +15,13 @@ func (qs *queryStore) push(q *query) uuid.UUID {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 
-	id := uuid.New()
-	qs.store[id] = q
+	qs.store[q.id] = q
 	go func() {
 		if _, ok := <-q.req.Context().Done(); !ok {
-			qs.pop(id)
+			qs.pop(q.id)
 		}
 	}()
-	return id
+	return q.id
 }
 
 func (qs *queryStore) pop(id uuid.UUID) *query {
