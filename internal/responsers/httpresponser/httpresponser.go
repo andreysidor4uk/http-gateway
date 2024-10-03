@@ -1,10 +1,14 @@
 package httpresponser
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -15,8 +19,30 @@ type HTTPResponser struct {
 	store  *queryStore
 }
 
-func (r *HTTPResponser) ListenAndServe() error {
-	return r.server.ListenAndServe()
+func (r *HTTPResponser) ListenAndServe() {
+	idleConnsClosed := make(chan struct{})
+	go func() {
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt)
+		<-sigint
+
+		slog.Info("HTTP responser Shutdown...")
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		if err := r.server.Shutdown(ctx); err != nil {
+			slog.Error("HTTP responser Shutdown", "err", err)
+		}
+		cancel()
+		close(idleConnsClosed)
+	}()
+
+	slog.Info("Start HTTP responser...")
+	if err := r.server.ListenAndServe(); err != http.ErrServerClosed {
+		slog.Error("HTTP responser failed to start", "err", err)
+		os.Exit(1)
+	}
+
+	<-idleConnsClosed
 }
 
 func (r *HTTPResponser) Response(w http.ResponseWriter, req *http.Request) {
