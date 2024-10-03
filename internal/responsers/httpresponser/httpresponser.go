@@ -2,7 +2,9 @@ package httpresponser
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/google/uuid"
 )
@@ -20,14 +22,35 @@ func (r *HTTPResponser) ListenAndServe() error {
 func (r *HTTPResponser) Response(w http.ResponseWriter, req *http.Request) {
 	q := newQuery(w, req)
 
-	select {
-	case <-req.Context().Done():
-	case r.queue <- q:
-	}
+	slog.Debug("New query for processing",
+		"id", q.id,
+		"method", q.req.Method,
+		"url", q.req.RequestURI)
 
 	select {
 	case <-req.Context().Done():
-	case <-q.done:
+		slog.Error("Client closed connection without waiting for request to be processed",
+			"id", q.id,
+			"method", q.req.Method,
+			"url", q.req.RequestURI)
+	case r.queue <- q:
+		slog.Debug("Query is processing",
+			"id", q.id,
+			"method", q.req.Method,
+			"url", q.req.RequestURI)
+
+		select {
+		case <-req.Context().Done():
+			slog.Error("Сlient closed connection while processing request",
+				"id", q.id,
+				"method", q.req.Method,
+				"url", q.req.RequestURI)
+		case <-q.done:
+			slog.Debug("Query done",
+				"id", q.id,
+				"method", q.req.Method,
+				"url", q.req.RequestURI)
+		}
 	}
 }
 
@@ -71,6 +94,15 @@ func (r *HTTPResponser) responseHandler(w http.ResponseWriter, req *http.Request
 	defer func() {
 		q.done <- struct{}{}
 	}()
+
+	if strStatus := req.Header.Get("x-req-status"); strStatus != "" {
+		status, err := strconv.Atoi(strStatus)
+		if err != nil {
+			http.Error(w, "Bad x-req-status header.", http.StatusBadRequest)
+			return
+		}
+		q.w.WriteHeader(status)
+	}
 
 	for key, headers := range req.Header {
 		for _, value := range headers {

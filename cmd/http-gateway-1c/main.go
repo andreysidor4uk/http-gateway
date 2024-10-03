@@ -8,7 +8,6 @@ import (
 )
 
 func main() {
-
 	httpResponser := httpresponser.New(":8091")
 	receiver := receiver.New(":8090", httpResponser)
 
